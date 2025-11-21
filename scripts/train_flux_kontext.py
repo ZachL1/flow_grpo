@@ -19,6 +19,8 @@ from transformers.integrations.deepspeed import (
     unset_hf_deepspeed_config,
 )
 import numpy as np
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import flow_grpo.prompts
 import flow_grpo.rewards
 from flow_grpo.stat_tracking import PerPromptStatTracker
@@ -36,87 +38,14 @@ import random
 from torch.utils.data import Dataset, DataLoader, Sampler
 from flow_grpo.ema import EMAModuleWrapper
 
+from flow_grpo.train_utils import GenevalPromptImageDataset, DistributedKRepeatSampler, RealESRGANPromptImageDataset
+
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
 FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", "config/base.py", "Training configuration.")
 
 logger = get_logger(__name__)
-
-class GenevalPromptImageDataset(Dataset):
-    def __init__(self, dataset, split='train'):
-        self.dataset = dataset
-        self.file_path = os.path.join(dataset, f'{split}_metadata.jsonl')
-        with open(self.file_path, 'r', encoding='utf-8') as f:
-            self.metadatas = [json.loads(line) for line in f]
-            self.prompts = [item['prompt'] for item in self.metadatas]
-        
-    def __len__(self):
-        return len(self.prompts)
-    
-    def __getitem__(self, idx):
-        item = {
-            "prompt": self.prompts[idx],
-            "metadata": self.metadatas[idx]
-        }
-        # Assuming 'image' in metadata contains a path to the image file
-        image_path = self.metadatas[idx]['image']
-        item["prompt_with_image_path"] = f"{self.prompts[idx]}_{image_path}"
-        image = Image.open(os.path.join(self.dataset, image_path)).convert('RGB')
-        item["image"] = image
-        return item
-
-    @staticmethod
-    def collate_fn(examples):
-        prompts = [example["prompt"] for example in examples]
-        metadatas = [example["metadata"] for example in examples]
-        images = [example["image"] for example in examples]
-        prompt_with_image_paths = [example["prompt_with_image_path"] for example in examples]
-        return prompts, metadatas, images, prompt_with_image_paths
-
-class DistributedKRepeatSampler(Sampler):
-    def __init__(self, dataset, batch_size, k, num_replicas, rank, seed=0):
-        self.dataset = dataset
-        self.batch_size = batch_size  # Batch size per replica
-        self.k = k                    # Number of repetitions per sample
-        self.num_replicas = num_replicas  # Total number of replicas
-        self.rank = rank              # Current replica rank
-        self.seed = seed              # Random seed for synchronization
-        
-        # Compute the number of unique samples needed per iteration
-        self.total_samples = self.num_replicas * self.batch_size
-        assert self.total_samples % self.k == 0, f"k can not divide n*b, k{k}-num_replicas{num_replicas}-batch_size{batch_size}"
-        self.m = self.total_samples // self.k  # Number of unique samples
-        self.epoch = 0
-
-    def __iter__(self):
-        while True:
-            # Generate a deterministic random sequence to ensure all replicas are synchronized
-            g = torch.Generator()
-            g.manual_seed(self.seed + self.epoch)
-            
-            # Randomly select m unique samples
-            indices = torch.randperm(len(self.dataset), generator=g)[:self.m].tolist()
-            
-            # Repeat each sample k times to generate n*b total samples
-            repeated_indices = [idx for idx in indices for _ in range(self.k)]
-            
-            # Shuffle to ensure uniform distribution
-            shuffled_indices = torch.randperm(len(repeated_indices), generator=g).tolist()
-            shuffled_samples = [repeated_indices[i] for i in shuffled_indices]
-            
-            # Split samples to each replica
-            per_card_samples = []
-            for i in range(self.num_replicas):
-                start = i * self.batch_size
-                end = start + self.batch_size
-                per_card_samples.append(shuffled_samples[start:end])
-            
-            # Return current replica's sample indices
-            yield per_card_samples[self.rank]
-    
-    def set_epoch(self, epoch):
-        self.epoch = epoch  # Used to synchronize random state across epochs
 
 
 def compute_text_embeddings(prompt, text_encoders, tokenizers, max_sequence_length, device):
@@ -225,7 +154,7 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
             disable=not accelerator.is_local_main_process,
             position=0,
         ):
-        prompts, prompt_metadata, ref_images, _ = test_batch
+        prompts, prompt_metadata, ref_images, _, target_images = test_batch
         ref_images = [ref_image.resize((config.resolution, config.resolution)) for ref_image in ref_images]
         prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
             prompts, 
@@ -249,7 +178,7 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
                     max_area=config.resolution*config.resolution,
                     noise_level=0,
                 )
-        rewards = executor.submit(reward_fn, images, prompts, prompt_metadata, ref_images, only_strict=False)
+        rewards = executor.submit(reward_fn, images, prompts, prompt_metadata, ref_images, only_strict=False, target_images=target_images)
         # yield to to make sure reward computation starts
         time.sleep(0)
         rewards, reward_metadata = rewards.result()
@@ -404,7 +333,9 @@ def main(_):
     pipeline.text_encoder.to(accelerator.device, dtype=inference_dtype)
     pipeline.text_encoder_2.to(accelerator.device, dtype=inference_dtype)
     
-    pipeline.transformer.to(accelerator.device)
+    # Move transformer to device. Use inference_dtype to save memory during loading.
+    # Accelerator will handle precision conversion during training if needed.
+    pipeline.transformer.to(accelerator.device, dtype=inference_dtype)
 
     if config.use_lora:
         # Set correct lora layers
@@ -437,6 +368,12 @@ def main(_):
             pipeline.transformer = get_peft_model(pipeline.transformer, transformer_lora_config)
     
     transformer = pipeline.transformer
+    
+    # Enable gradient checkpointing to save memory
+    if config.train.get('use_gradient_checkpointing', False) and hasattr(transformer, 'enable_gradient_checkpointing'):
+        transformer.enable_gradient_checkpointing()
+        logger.info("Gradient checkpointing enabled")
+    
     transformer_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
     # This ema setting affects the previous 20 × 8 = 160 steps on average.
     ema = EMAModuleWrapper(transformer_trainable_parameters, decay=0.9, update_step_interval=8, device=accelerator.device)
@@ -467,8 +404,8 @@ def main(_):
         eps=config.train.adam_epsilon,
     )
 
-    train_dataset = GenevalPromptImageDataset(config.dataset, 'train')
-    test_dataset = GenevalPromptImageDataset(config.dataset, 'test')
+    train_dataset = RealESRGANPromptImageDataset(config.dataset, 'train')
+    test_dataset = RealESRGANPromptImageDataset(config.dataset, 'test')
 
     train_sampler = DistributedKRepeatSampler( 
         dataset=train_dataset,
@@ -483,13 +420,13 @@ def main(_):
         train_dataset,
         batch_sampler=train_sampler,
         num_workers=0,
-        collate_fn=GenevalPromptImageDataset.collate_fn,
+        collate_fn=RealESRGANPromptImageDataset.collate_fn,
         # persistent_workers=True
     )
     test_dataloader = DataLoader(
         test_dataset,
         batch_size=config.sample.test_batch_size,
-        collate_fn=GenevalPromptImageDataset.collate_fn,
+        collate_fn=RealESRGANPromptImageDataset.collate_fn,
         shuffle=False,
         num_workers=8,
     )
@@ -513,11 +450,11 @@ def main(_):
         # Using deepspeed zero3 will cause the model parameter `weight.shape` to be empty.
         unset_hf_deepspeed_config()
         reward_fn = getattr(flow_grpo.rewards, 'multi_score')(accelerator.device, config.reward_fn)
-        eval_reward_fn = getattr(flow_grpo.rewards, 'multi_score')(accelerator.device, config.reward_fn)
+        eval_reward_fn = getattr(flow_grpo.rewards, 'multi_score')(accelerator.device, config.eval_reward_fn)
         set_hf_deepspeed_config(accelerator.state.deepspeed_plugin.dschf)
     else:
         reward_fn = getattr(flow_grpo.rewards, 'multi_score')(accelerator.device, config.reward_fn)
-        eval_reward_fn = getattr(flow_grpo.rewards, 'multi_score')(accelerator.device, config.reward_fn)
+        eval_reward_fn = getattr(flow_grpo.rewards, 'multi_score')(accelerator.device, config.eval_reward_fn)
     
     # Prepare everything with our `accelerator`.
     transformer, optimizer, train_dataloader, test_dataloader = accelerator.prepare(transformer, optimizer, train_dataloader, test_dataloader)
@@ -578,7 +515,7 @@ def main(_):
             position=0,
         ):
             train_sampler.set_epoch(epoch * config.sample.num_batches_per_epoch + i)
-            prompts, prompt_metadata, ref_images, prompt_with_image_paths = next(train_iter)
+            prompts, prompt_metadata, ref_images, prompt_with_image_paths, target_images = next(train_iter)
             ref_images = [ref_image.resize((config.resolution, config.resolution)) for ref_image in ref_images]
 
             prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
@@ -627,7 +564,7 @@ def main(_):
             )  # (batch_size, num_steps)
 
             # compute rewards asynchronously
-            rewards = executor.submit(reward_fn, images, prompts, prompt_metadata, ref_images, only_strict=True)
+            rewards = executor.submit(reward_fn, images, prompts, prompt_metadata, ref_images, only_strict=True, target_images=target_images)
             # yield to to make sure reward computation starts
             time.sleep(0)
             samples.append(

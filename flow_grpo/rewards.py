@@ -28,6 +28,63 @@ def jpeg_compressibility():
 
     return _fn
 
+def lpips_score(device):
+    from flow_grpo.lpips_scorer import LPIPSScorer
+
+    scorer = LPIPSScorer(net='alex', device=device)
+
+    def _fn(images, target_images):
+        if not isinstance(images, torch.Tensor):
+            images = images.transpose(0, 3, 1, 2)  # NHWC -> NCHW
+            images = torch.tensor(images, dtype=torch.uint8)/255.0
+        if not isinstance(target_images, torch.Tensor):
+            target_images = [np.array(img) for img in target_images]
+            target_images = np.array(target_images)
+            target_images = target_images.transpose(0, 3, 1, 2)  # NHWC -> NCHW
+            target_images = torch.tensor(target_images, dtype=torch.uint8)/255.0
+        scores = scorer(images, target_images)
+        return scores, {}
+
+    return _fn
+
+def ssim_score(device):
+    from flow_grpo.ssim_scorer import SSIMScorer
+    scorer = SSIMScorer(device=device)
+
+    def _fn(images, target_images):
+        if isinstance(images, torch.Tensor): 
+            images = images.permute(0, 2, 3, 1)  # NCHW -> NHWC
+            images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
+        else: # NHWC numpy array
+            pass
+        if not isinstance(target_images, np.ndarray):
+            # list of PIL.Image
+            target_images = [np.array(img) for img in target_images]
+            target_images = np.array(target_images)
+        scores = scorer(images, target_images)
+        return scores, {}
+
+    return _fn
+
+def psnr_score(device):
+    from flow_grpo.psnr_scorer import PSNRScorer
+    scorer = PSNRScorer(device=device)
+
+    def _fn(images, target_images):
+        if isinstance(images, torch.Tensor): 
+            images = images.permute(0, 2, 3, 1)  # NCHW -> NHWC
+            images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
+        else: # NHWC numpy array
+            pass
+        if not isinstance(target_images, np.ndarray):
+            # list of PIL.Image
+            target_images = [np.array(img) for img in target_images]
+            target_images = np.array(target_images)
+        scores = scorer(images, target_images)
+        return scores, {}
+
+    return _fn
+
 def aesthetic_score():
     from flow_grpo.aesthetic_scorer import AestheticScorer
 
@@ -421,13 +478,18 @@ def multi_score(device, score_dict):
         "geneval": geneval_score,
         "clipscore": clip_score,
         "image_similarity": image_similarity_score,
+        "image_similarity_target": image_similarity_score,
+        "lpips": lpips_score,
+        "ssim": ssim_score,
+        "psnr": psnr_score,
+        # "niqe": niqe_score,
     }
     score_fns={}
     for score_name, weight in score_dict.items():
         score_fns[score_name] = score_functions[score_name](device) if 'device' in score_functions[score_name].__code__.co_varnames else score_functions[score_name]()
 
     # only_strict is only for geneval. During training, only the strict reward is needed, and non-strict rewards don't need to be computed, reducing reward calculation time.
-    def _fn(images, prompts, metadata, ref_images=None, only_strict=True):
+    def _fn(images, prompts, metadata, ref_images=None, only_strict=True, target_images=None):
         total_scores = []
         score_details = {}
         
@@ -442,6 +504,8 @@ def multi_score(device, score_dict):
                     score_details[f'{key}_accuracy'] = value
             elif score_name == "image_similarity":
                 scores, rewards = score_fns[score_name](images, ref_images)
+            elif score_name in ["image_similarity_target", "lpips", "ssim", "psnr"]:
+                scores, rewards = score_fns[score_name](images, target_images)
             else:
                 scores, rewards = score_fns[score_name](images, prompts, metadata)
             score_details[score_name] = scores
