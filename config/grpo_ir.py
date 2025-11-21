@@ -8,9 +8,10 @@ def compressibility():
     config = base.get_config()
 
     config.dataset = os.path.join(os.getcwd(), "dataset/LSDIR")
+    config.test_dataset = os.path.join(os.getcwd(), "dataset/eval")
     config.reward_fn = {
         "image_similarity": 0.1,
-        # "geneval": 0.5,
+        # "image_similarity_target": 0.1,
         "lpips": 0.9,
     }
     config.eval_reward_fn = {

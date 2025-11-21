@@ -64,6 +64,46 @@ class RealESRGANPromptImageDataset(Dataset):
         image_targets = [example["image_target"] for example in examples]
         return prompts, metadatas, images, prompt_with_image_paths, image_targets
 
+class EvalPromptImageDataset(Dataset):
+    def __init__(self, dataset, split='test'):
+        if split != 'test':
+            raise ValueError(f"EvalPromptImageDataset only supports test split, got {split}")
+        
+        self.dataset = dataset
+        self.file_path = os.path.join(dataset, f'{split}_metadata.jsonl')
+        with open(self.file_path, 'r', encoding='utf-8') as f:
+            self.metadatas = [json.loads(line) for line in f]
+            self.prompts = [item.get('prompt', RESTORE_PROMPT) for item in self.metadatas]
+        
+    def __len__(self):
+        return len(self.prompts)
+    
+    def __getitem__(self, idx):
+        item = {
+            "prompt": self.prompts[idx],
+            "metadata": self.metadatas[idx]
+        }
+        image_path = self.metadatas[idx]['lq_image']
+        item["prompt_with_image_path"] = f"{self.prompts[idx]}_{image_path}"
+        image = Image.open(os.path.join(self.dataset, image_path)).convert('RGB')
+        item["image"] = image
+        if 'hq_image' in self.metadatas[idx]:
+            hq_image_path = self.metadatas[idx]['hq_image']
+            hq_image = Image.open(os.path.join(self.dataset, hq_image_path)).convert('RGB')
+            item["image_target"] = hq_image
+        else:
+            item["image_target"] = image
+        return item
+
+    @staticmethod
+    def collate_fn(examples):
+        prompts = [example["prompt"] for example in examples]
+        metadatas = [example["metadata"] for example in examples]
+        prompt_with_image_paths = [example["prompt_with_image_path"] for example in examples]
+        images = [example["image"] for example in examples]
+        image_targets = [example["image_target"] for example in examples]
+        return prompts, metadatas, images, prompt_with_image_paths, image_targets
+
 class GenevalPromptImageDataset(Dataset):
     def __init__(self, dataset, split='train'):
         self.dataset = dataset

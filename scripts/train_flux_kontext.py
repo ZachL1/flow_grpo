@@ -9,7 +9,7 @@ import hashlib
 from absl import app, flags
 from accelerate import Accelerator
 from ml_collections import config_flags
-from accelerate.utils import set_seed, ProjectConfiguration
+from accelerate.utils import set_seed, ProjectConfiguration, gather_object
 from accelerate.logging import get_logger
 from diffusers import FluxKontextPipeline
 from diffusers.utils.torch_utils import is_compiled_module
@@ -38,7 +38,7 @@ import random
 from torch.utils.data import Dataset, DataLoader, Sampler
 from flow_grpo.ema import EMAModuleWrapper
 
-from flow_grpo.train_utils import GenevalPromptImageDataset, DistributedKRepeatSampler, RealESRGANPromptImageDataset
+from flow_grpo.train_utils import GenevalPromptImageDataset, DistributedKRepeatSampler, RealESRGANPromptImageDataset, EvalPromptImageDataset
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
@@ -148,6 +148,7 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
 
     # test_dataloader = itertools.islice(test_dataloader, 2)
     all_rewards = defaultdict(list)
+    all_sources = defaultdict(list)
     for test_batch in tqdm(
             test_dataloader,
             desc="Eval: ",
@@ -182,10 +183,15 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
         # yield to to make sure reward computation starts
         time.sleep(0)
         rewards, reward_metadata = rewards.result()
+        sources = [item['source'] for item in prompt_metadata]
 
         for key, value in rewards.items():
             rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
             all_rewards[key].append(rewards_gather)
+            sources_gather = gather_object(sources)
+            # gather_object returns a list of lists (one per process), so we flatten it
+            # sources_gather = [s for sublist in sources_gather for s in sublist]
+            all_sources[key].append(sources_gather)
     
     last_batch_images_gather = accelerator.gather(torch.as_tensor(images, device=accelerator.device)).float().cpu().numpy()
     last_batch_prompt_ids = tokenizers[0](
@@ -204,6 +210,7 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
         last_batch_rewards_gather[key] = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).float().cpu().numpy()
 
     all_rewards = {key: np.concatenate(value) for key, value in all_rewards.items()}
+    all_sources = {key: [s for sublist in value for s in sublist] for key, value in all_sources.items()}
     if accelerator.is_main_process:
         with tempfile.TemporaryDirectory() as tmpdir:
             num_samples = min(15, len(last_batch_images_gather))
@@ -405,7 +412,8 @@ def main(_):
     )
 
     train_dataset = RealESRGANPromptImageDataset(config.dataset, 'train')
-    test_dataset = RealESRGANPromptImageDataset(config.dataset, 'test')
+    # test_dataset = RealESRGANPromptImageDataset(config.dataset, 'test')
+    test_dataset = EvalPromptImageDataset(config.test_dataset, 'test')
 
     train_sampler = DistributedKRepeatSampler( 
         dataset=train_dataset,
@@ -426,7 +434,7 @@ def main(_):
     test_dataloader = DataLoader(
         test_dataset,
         batch_size=config.sample.test_batch_size,
-        collate_fn=RealESRGANPromptImageDataset.collate_fn,
+        collate_fn=EvalPromptImageDataset.collate_fn,
         shuffle=False,
         num_workers=8,
     )

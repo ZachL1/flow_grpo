@@ -5,7 +5,14 @@
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio, WebStorm and Rider
 # Reference: https://intellij-support.jetbrains.com/hc/en-us/articles/206544839
 
-dataset/counting_edit
+dataset/counting_edit/generated_images
+dataset/eval/DiversePhotos/x1
+dataset/eval/DiversePhotos/x4
+dataset/eval/RealPhoto60/LQ
+dataset/eval/RealSR(V3)/Canon
+dataset/eval/RealSR(V3)/Nikon
+dataset/LSDIR/HQ
+
 
 # User-specific stuff
 .DS_Store
