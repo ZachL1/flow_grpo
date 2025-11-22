@@ -28,6 +28,34 @@ def jpeg_compressibility():
 
     return _fn
 
+def niqe_score(device):
+    from pyiqa import create_metric
+    scorer = create_metric('niqe', device=device)
+
+    def _fn(images):
+        if not isinstance(images, torch.Tensor):
+            images = images.transpose(0, 3, 1, 2)  # NHWC -> NCHW
+            images = torch.tensor(images, dtype=torch.uint8)/255.0
+        scores = scorer(images.to(torch.float))
+        if scores.dim() == 0:
+            scores = scores.unsqueeze(0)
+        return scores, {}
+
+    return _fn
+
+def musiq_score(device):
+    from pyiqa import create_metric
+    scorer = create_metric('musiq', device=device)
+
+    def _fn(images):
+        if not isinstance(images, torch.Tensor):
+            images = images.transpose(0, 3, 1, 2)  # NHWC -> NCHW
+            images = torch.tensor(images, dtype=torch.uint8)/255.0
+        scores = scorer(images.to(torch.float)).squeeze(1)
+        return scores, {}
+
+    return _fn
+
 def lpips_score(device):
     from flow_grpo.lpips_scorer import LPIPSScorer
 
@@ -39,6 +67,7 @@ def lpips_score(device):
             images = torch.tensor(images, dtype=torch.uint8)/255.0
         if not isinstance(target_images, torch.Tensor):
             target_images = [np.array(img) for img in target_images]
+            # TODO: target_images not same shape in RealSR(V3)
             target_images = np.array(target_images)
             target_images = target_images.transpose(0, 3, 1, 2)  # NHWC -> NCHW
             target_images = torch.tensor(target_images, dtype=torch.uint8)/255.0
@@ -482,7 +511,8 @@ def multi_score(device, score_dict):
         "lpips": lpips_score,
         "ssim": ssim_score,
         "psnr": psnr_score,
-        # "niqe": niqe_score,
+        "niqe": niqe_score,
+        "musiq": musiq_score,
     }
     score_fns={}
     for score_name, weight in score_dict.items():
@@ -506,6 +536,8 @@ def multi_score(device, score_dict):
                 scores, rewards = score_fns[score_name](images, ref_images)
             elif score_name in ["image_similarity_target", "lpips", "ssim", "psnr"]:
                 scores, rewards = score_fns[score_name](images, target_images)
+            elif score_name in ["niqe", "musiq"]:
+                scores, rewards = score_fns[score_name](images)
             else:
                 scores, rewards = score_fns[score_name](images, prompts, metadata)
             score_details[score_name] = scores
