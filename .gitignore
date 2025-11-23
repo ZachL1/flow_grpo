@@ -11,6 +11,7 @@ dataset/eval/DiversePhotos/x4
 dataset/eval/RealPhoto60/LQ
 dataset/eval/RealSR(V3)/Canon
 dataset/eval/RealSR(V3)/Nikon
+dataset/eval/DRealSR/Test_x4
 dataset/LSDIR/HQ
 
 

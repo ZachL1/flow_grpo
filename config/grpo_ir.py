@@ -19,8 +19,8 @@ def compressibility():
         "lpips": 1,
         "ssim": 1,
         "psnr": 1,
-        # "niqe": 1,
-        
+        "niqe": 1,
+        "musiq": 1,
     }
 
     config.use_lora = True
@@ -53,7 +53,7 @@ def ir_flux_kontext_1gpu():
     config.sample.num_image_per_prompt = 1
     config.sample.num_batches_per_epoch = int(2/(gpu_number*config.sample.train_batch_size/config.sample.num_image_per_prompt))
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
-    config.sample.test_batch_size = 2 # This bs is a special design, the test set has a total of 2048, to make gpu_num*bs*n as close as possible to 2048, because when the number of samples cannot be divided evenly by the number of cards, multi-card will fill the last batch to ensure each card has the same number of samples, affecting gradient synchronization.
+    config.sample.test_batch_size = 1 # This bs is a special design, the test set has a total of 2048, to make gpu_num*bs*n as close as possible to 2048, because when the number of samples cannot be divided evenly by the number of cards, multi-card will fill the last batch to ensure each card has the same number of samples, affecting gradient synchronization.
 
     config.train.use_gradient_checkpointing = True
     config.train.batch_size = config.sample.train_batch_size
@@ -73,7 +73,7 @@ def ir_flux_kontext_1gpu():
     return config
 
 def ir_flux_kontext():
-    gpu_number=28
+    gpu_number=8
     config = compressibility()
 
     config.pretrained.model = "black-forest-labs/FLUX.1-Kontext-dev"
@@ -82,11 +82,11 @@ def ir_flux_kontext():
     config.sample.guidance_scale = 2.5
 
     config.resolution = 512
-    config.sample.train_batch_size = 3
-    config.sample.num_image_per_prompt = 21
+    config.sample.train_batch_size = 2
+    config.sample.num_image_per_prompt = 16
     config.sample.num_batches_per_epoch = int(48/(gpu_number*config.sample.train_batch_size/config.sample.num_image_per_prompt))
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
-    config.sample.test_batch_size = 2 # This bs is a special design, the test set has a total of 2048, to make gpu_num*bs*n as close as possible to 2048, because when the number of samples cannot be divided evenly by the number of cards, multi-card will fill the last batch to ensure each card has the same number of samples, affecting gradient synchronization.
+    config.sample.test_batch_size = 1 # This bs is a special design, the test set has a total of 2048, to make gpu_num*bs*n as close as possible to 2048, because when the number of samples cannot be divided evenly by the number of cards, multi-card will fill the last batch to ensure each card has the same number of samples, affecting gradient synchronization.
 
     config.train.batch_size = config.sample.train_batch_size
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch//2

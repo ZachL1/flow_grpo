@@ -67,5 +67,19 @@ def generate_metadata():
                                 }
                                 f.write(json.dumps(entry) + '\n')
 
+
+        # 4. DRealSR
+        drealsr_path = "dataset/eval/DRealSR/Test_x4"
+        if os.path.exists(drealsr_path):
+            for filename in sorted(os.listdir(os.path.join(drealsr_path, "test_LR"))):
+                if filename.endswith(".png"):
+                    entry = {
+                        "tag": "restoration",
+                        "source": "DRealSR",
+                        "lq_image": os.path.join(drealsr_path, "test_LR", filename).replace("dataset/eval/", ""),
+                        "hq_image": os.path.join(drealsr_path, "test_HR", filename.replace("_x1.png", "_x4.png")).replace("dataset/eval/", "")
+                    }
+                    f.write(json.dumps(entry) + '\n')
+
 if __name__ == "__main__":
     generate_metadata()

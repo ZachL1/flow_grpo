@@ -211,6 +211,17 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
 
     all_rewards = {key: np.concatenate(value) for key, value in all_rewards.items()}
     all_sources = {key: [s for sublist in value for s in sublist] for key, value in all_sources.items()}
+
+    grouped_rewards = {}
+    for key, sources in all_sources.items():
+        rewards = all_rewards[key]
+        sources_np = np.array(sources)
+        unique_sources = np.unique(sources_np)
+        for source in unique_sources:
+            mask = (sources_np == source)
+            grouped_rewards[f"{source}_{key}"] = rewards[mask]
+    all_rewards = grouped_rewards
+
     if accelerator.is_main_process:
         with tempfile.TemporaryDirectory() as tmpdir:
             num_samples = min(15, len(last_batch_images_gather))

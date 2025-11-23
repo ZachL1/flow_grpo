@@ -3,7 +3,7 @@ import json
 from PIL import Image
 from torch.utils.data import Dataset, Sampler
 import torch
-from torchvision.transforms.functional import to_pil_image
+from torchvision.transforms.functional import to_pil_image, center_crop
 
 from realesrgan.realesrgan import RealESRGANDataset
 from realesrgan.batch_transform import RealESRGANBatchTransform
@@ -93,6 +93,17 @@ class EvalPromptImageDataset(Dataset):
             item["image_target"] = hq_image
         else:
             item["image_target"] = image
+        
+        for k in ["image", "image_target"]:
+            # center crop item[k]
+            item[k] = center_crop(item[k], min(item[k].size))
+        
+            while min(*item[k].size) >= 2 * 512:
+                item[k] = item[k].resize(
+                    tuple(x // 2 for x in item[k].size), resample=Image.BOX
+                )
+            item[k] = item[k].resize((512, 512), resample=Image.BICUBIC)
+
         return item
 
     @staticmethod
