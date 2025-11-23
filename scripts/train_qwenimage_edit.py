@@ -466,7 +466,7 @@ def main(_):
         optimizer = register_optimizer_offload_hooks(optimizer)
     
     train_dataset = RealESRGANPromptImageDataset(config.dataset, 'train')
-    test_dataset = EvalPromptImageDataset(config.dataset, 'test')
+    test_dataset = EvalPromptImageDataset(config.test_dataset, 'test')
 
     train_sampler = DistributedKRepeatSampler( 
         dataset=train_dataset,

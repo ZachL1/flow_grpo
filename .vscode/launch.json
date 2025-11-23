@@ -12,7 +12,7 @@
             "args": [
                 "--config_file", "scripts/accelerate_configs/multi_gpu.yaml",
                 "--num_processes=1",
-                "--main_process_port", "29501",
+                "--main_process_port", "9001",
                 "scripts/train_flux_kontext.py",
                 "--config", "config/grpo_ir.py:ir_flux_kontext_1gpu"
             ],
@@ -21,6 +21,27 @@
             "cwd": "${workspaceFolder}",
             "env": {
                 "WANDB_MODE": "offline"
+            }
+        },
+        {
+            "name": "Debug Qwen Image Training 1GPU",
+            "type": "python",
+            "request": "launch",
+            "module": "accelerate.commands.launch",
+            "args": [
+                "--config_file", "scripts/accelerate_configs/multi_gpu.yaml",
+                "--num_processes=1",
+                "--main_process_port", "9001",
+                "scripts/train_qwenimage_edit.py",
+                "--config", "config/grpo_ir.py:ir_qwenimage_edit_1gpu"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "WANDB_MODE": "offline",
+                "CUDA_VISIBLE_DEVICES": "0",
+                "HF_HOME": "../.cache/huggingface",
             }
         }
     ]
