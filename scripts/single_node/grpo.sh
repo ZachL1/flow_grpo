@@ -11,14 +11,13 @@
 # pip install peft==0.17.0
 # pip install deepspeed==0.17.2 accelerate==1.9.0 transformers==4.54.0 lpips
 
-# huggingface-cli login
-# xxx
+export HF_HOME="../.cache/huggingface"
+# huggingface-cli login --token xxx
 
 # pip install -U wandb
 # wandb login --relogin xxx
 
 # export WANDB_MODE=offline
-export HF_HOME="../.cache/huggingface"
 accelerate launch --config_file scripts/accelerate_configs/multi_gpu.yaml --num_processes=1 --main_process_port 9001 scripts/train_flux_kontext.py --config config/grpo_ir.py:ir_flux_kontext_1gpu
 
 # 8 GPU

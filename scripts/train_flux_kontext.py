@@ -184,13 +184,14 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
         time.sleep(0)
         rewards, reward_metadata = rewards.result()
         sources = [item['source'] for item in prompt_metadata]
+        sources_gather = gather_object(sources)
+        if isinstance(sources_gather[0], list):
+            # flatten the list of lists
+            sources_gather = [s for sublist in sources_gather for s in sublist]
 
         for key, value in rewards.items():
             rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
             all_rewards[key].append(rewards_gather)
-            sources_gather = gather_object(sources)
-            # gather_object returns a list of lists (one per process), so we flatten it
-            # sources_gather = [s for sublist in sources_gather for s in sublist]
             all_sources[key].append(sources_gather)
     
     last_batch_images_gather = accelerator.gather(torch.as_tensor(images, device=accelerator.device)).float().cpu().numpy()

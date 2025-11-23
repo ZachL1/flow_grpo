@@ -39,7 +39,7 @@ from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftMode
 import random
 from torch.utils.data import Dataset, DataLoader, Sampler
 from flow_grpo.ema import EMAModuleWrapper
-from flow_grpo.train_utils import GenevalPromptImageDataset, DistributedKRepeatSampler, RealESRGANPromptImageDataset
+from flow_grpo.train_utils import GenevalPromptImageDataset, DistributedKRepeatSampler, RealESRGANPromptImageDataset, EvalPromptImageDataset
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
@@ -53,6 +53,18 @@ def gather_tensor(tensor, world_size):
     gather_list = [torch.zeros_like(tensor) for _ in range(world_size)]
     dist.all_gather(gather_list, tensor)
     return torch.cat(gather_list)
+
+def gather_object(obj, world_size):
+    if world_size == 1:
+        return obj
+    
+    gather_list = [None for _ in range(world_size)]
+    dist.all_gather_object(gather_list, obj)
+    if isinstance(gather_list[0], list):
+        # flatten the list of lists
+        return [s for sublist in gather_list for s in sublist]
+    else:
+        return gather_list
 
 def set_seed(seed, device_specific=True):
     import random
@@ -177,6 +189,7 @@ def eval(pipeline, test_dataloader, config, rank, local_rank, world_size, device
     if config.train.ema:
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
     all_rewards = defaultdict(list)
+    all_sources = defaultdict(list)
     for test_batch in tqdm(
             test_dataloader,
             desc="Eval: ",
@@ -205,10 +218,13 @@ def eval(pipeline, test_dataloader, config, rank, local_rank, world_size, device
         # yield to to make sure reward computation starts
         time.sleep(0)
         rewards, reward_metadata = rewards.result()
+        sources = [item['source'] for item in prompt_metadata]
+        sources_gather = gather_object(sources, world_size)
 
         for key, value in rewards.items():
             rewards_gather = gather_tensor(torch.as_tensor(value, device=device).contiguous(), world_size).cpu().float().numpy()
             all_rewards[key].append(rewards_gather)
+            all_sources[key].append(sources_gather)
     
     last_batch_images_gather = gather_tensor(torch.as_tensor(images, device=device), world_size).cpu().float().numpy()
     last_batch_prompt_ids = pipeline.tokenizer(
@@ -227,6 +243,18 @@ def eval(pipeline, test_dataloader, config, rank, local_rank, world_size, device
         last_batch_rewards_gather[key] = gather_tensor(torch.as_tensor(value, device=device).contiguous(), world_size).cpu().float().numpy()
 
     all_rewards = {key: np.concatenate(value) for key, value in all_rewards.items()}
+    all_sources = {key: [s for sublist in value for s in sublist] for key, value in all_sources.items()}
+
+    grouped_rewards = {}
+    for key, sources in all_sources.items():
+        rewards = all_rewards[key]
+        sources_np = np.array(sources)
+        unique_sources = np.unique(sources_np)
+        for source in unique_sources:
+            mask = (sources_np == source)
+            grouped_rewards[f"{source}_{key}"] = rewards[mask]
+    all_rewards = grouped_rewards
+
     if rank == 0:
         with tempfile.TemporaryDirectory() as tmpdir:
             num_samples = min(15, len(last_batch_images_gather))
@@ -438,7 +466,7 @@ def main(_):
         optimizer = register_optimizer_offload_hooks(optimizer)
     
     train_dataset = RealESRGANPromptImageDataset(config.dataset, 'train')
-    test_dataset = RealESRGANPromptImageDataset(config.dataset, 'test')
+    test_dataset = EvalPromptImageDataset(config.dataset, 'test')
 
     train_sampler = DistributedKRepeatSampler( 
         dataset=train_dataset,
@@ -462,7 +490,7 @@ def main(_):
         test_dataset,
         sampler=DistributedSampler(test_dataset, shuffle=False),
         batch_size=config.sample.test_batch_size,
-        collate_fn=RealESRGANPromptImageDataset.collate_fn,
+        collate_fn=EvalPromptImageDataset.collate_fn,
         shuffle=False,
         num_workers=8,
     )
