@@ -56,6 +56,32 @@ def musiq_score(device):
 
     return _fn
 
+def clipiqa_score(device):
+    from pyiqa import create_metric
+    scorer = create_metric('clipiqa', device=device)
+
+    def _fn(images):
+        if not isinstance(images, torch.Tensor):
+            images = images.transpose(0, 3, 1, 2)  # NHWC -> NCHW
+            images = torch.tensor(images, dtype=torch.uint8)/255.0
+        scores = scorer(images.to(torch.float)).squeeze(1)
+        return scores, {}
+
+    return _fn
+
+def maniqa_score(device):
+    from pyiqa import create_metric
+    scorer = create_metric('maniqa', device=device)
+
+    def _fn(images):
+        if not isinstance(images, torch.Tensor):
+            images = images.transpose(0, 3, 1, 2)  # NHWC -> NCHW
+            images = torch.tensor(images, dtype=torch.uint8)/255.0
+        scores = scorer(images.to(torch.float))
+        return scores, {}
+
+    return _fn
+
 def lpips_score(device):
     from flow_grpo.lpips_scorer import LPIPSScorer
 
@@ -513,6 +539,8 @@ def multi_score(device, score_dict):
         "psnr": psnr_score,
         "niqe": niqe_score,
         "musiq": musiq_score,
+        "clipiqa": clipiqa_score,
+        "maniqa": maniqa_score,
     }
     score_fns={}
     for score_name, weight in score_dict.items():
@@ -535,13 +563,13 @@ def multi_score(device, score_dict):
             elif score_name == "image_similarity":
                 scores, rewards = score_fns[score_name](images, ref_images)
             elif score_name in ["image_similarity_target", "lpips", "ssim", "psnr"]:
-                scores = torch.zeros(len(images), device=device, dtype=torch.float)
+                scores = torch.ones(len(images), device=device, dtype=torch.float) * -10
                 valid_indices = [img is not None for img in target_images]
                 valid_target = [img for img in target_images if img is not None]
                 if len(valid_target) > 0:
                     valid_scores, _ = score_fns[score_name](images[valid_indices], valid_target)
                     scores[valid_indices] = torch.as_tensor(valid_scores, device=device).float()
-            elif score_name in ["niqe", "musiq"]:
+            elif score_name in ["niqe", "musiq", "clipiqa", "maniqa"]:
                 scores, rewards = score_fns[score_name](images)
             else:
                 scores, rewards = score_fns[score_name](images, prompts, metadata)

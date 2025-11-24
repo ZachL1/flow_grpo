@@ -256,14 +256,15 @@ def eval(pipeline, test_dataloader, config, rank, local_rank, world_size, device
         unique_sources = np.unique(sources_np)
         for source in unique_sources:
             mask = (sources_np == source)
-            if np.any(rewards[mask]):
-                grouped_rewards[f"{source}_{key}"] = rewards[mask]
+            if np.any(rewards[mask] != -10):
+                grouped_rewards[f"{source}/{key}"] = rewards[mask]
     all_rewards = grouped_rewards
 
     if rank == 0:
         with tempfile.TemporaryDirectory() as tmpdir:
             num_samples = min(15, len(last_batch_images_gather))
-            sample_indices = range(num_samples)
+            sample_indices = random.Random(42).sample(range(len(last_batch_images_gather)), num_samples)
+            # sample_indices = range(num_samples)
             for idx, index in enumerate(sample_indices):
                 image = last_batch_images_gather[index]
                 image = (image.transpose(1, 2, 0) * 255).astype(np.uint8)
@@ -287,7 +288,7 @@ def eval(pipeline, test_dataloader, config, rank, local_rank, world_size, device
                         )
                         for idx, (source, prompt, reward) in enumerate(zip(sampled_sources, sampled_prompts, sampled_rewards))
                     ],
-                    **{f"eval_reward_{key}": np.mean(value[value != -10]) for key, value in all_rewards.items()},
+                    **{f"eval_reward/{key}": np.mean(value[value != -10]) for key, value in all_rewards.items()},
                 },
                 step=global_step,
             )

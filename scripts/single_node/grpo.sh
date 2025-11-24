@@ -9,8 +9,10 @@
 # conda install -c nvidia cuda-compiler
 # pip install git+https://github.com/huggingface/diffusers.git
 # pip install peft==0.17.0
-# pip install deepspeed==0.17.2 accelerate==1.9.0 transformers==4.54.0 lpips
+# pip install deepspeed==0.17.2 accelerate==1.9.0 transformers==4.54.0 lpips timm
+# pip install git+https://github.com/openai/CLIP.git
 
+export TORCH_HOME="../.cache/torch"
 export HF_HOME="../.cache/huggingface"
 # huggingface-cli login --token xxx
 

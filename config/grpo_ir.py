@@ -12,7 +12,8 @@ def compressibility():
     config.reward_fn = {
         # "image_similarity": 0.1,
         "image_similarity_target": 0.1,
-        "lpips": 0.9,
+        "ssim": 0.4,
+        "lpips": 0.5,
     }
     config.eval_reward_fn = {
         # "image_similarity": 1,
@@ -21,6 +22,8 @@ def compressibility():
         "psnr": 1,
         "niqe": 1,
         "musiq": 1,
+        "clipiqa": 1,
+        # "maniqa": 1,
     }
     config.sample.test_batch_size = 8 # This bs is a special design, the test set has a total of 2048, to make gpu_num*bs*n as close as possible to 2048, because when the number of samples cannot be divided evenly by the number of cards, multi-card will fill the last batch to ensure each card has the same number of samples, affecting gradient synchronization.
 
