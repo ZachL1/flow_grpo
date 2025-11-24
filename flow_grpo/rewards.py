@@ -535,7 +535,12 @@ def multi_score(device, score_dict):
             elif score_name == "image_similarity":
                 scores, rewards = score_fns[score_name](images, ref_images)
             elif score_name in ["image_similarity_target", "lpips", "ssim", "psnr"]:
-                scores, rewards = score_fns[score_name](images, target_images)
+                scores = torch.zeros(len(images), device=device, dtype=torch.float)
+                valid_indices = [img is not None for img in target_images]
+                valid_target = [img for img in target_images if img is not None]
+                if len(valid_target) > 0:
+                    valid_scores, _ = score_fns[score_name](images[valid_indices], valid_target)
+                    scores[valid_indices] = torch.as_tensor(valid_scores, device=device).float()
             elif score_name in ["niqe", "musiq"]:
                 scores, rewards = score_fns[score_name](images)
             else:

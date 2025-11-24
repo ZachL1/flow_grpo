@@ -190,11 +190,14 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
             sources_gather = [s for sublist in sources_gather for s in sublist]
 
         for key, value in rewards.items():
+            if key == 'avg':
+                continue
             rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
             all_rewards[key].append(rewards_gather)
             all_sources[key].append(sources_gather)
     
     last_batch_images_gather = accelerator.gather(torch.as_tensor(images, device=accelerator.device)).float().cpu().numpy()
+    last_batch_ref_images_gather = accelerator.gather(torch.as_tensor(np.array(ref_images), device=accelerator.device)).cpu().numpy()
     last_batch_prompt_ids = tokenizers[0](
         prompts,
         padding="max_length",
@@ -209,6 +212,7 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
     last_batch_rewards_gather = {}
     for key, value in rewards.items():
         last_batch_rewards_gather[key] = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).float().cpu().numpy()
+    last_batch_sources_gather = sources_gather
 
     all_rewards = {key: np.concatenate(value) for key, value in all_rewards.items()}
     all_sources = {key: [s for sublist in value for s in sublist] for key, value in all_sources.items()}
@@ -220,7 +224,8 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
         unique_sources = np.unique(sources_np)
         for source in unique_sources:
             mask = (sources_np == source)
-            grouped_rewards[f"{source}_{key}"] = rewards[mask]
+            if np.any(rewards[mask]):
+                grouped_rewards[f"{source}_{key}"] = rewards[mask]
     all_rewards = grouped_rewards
 
     if accelerator.is_main_process:
@@ -230,11 +235,13 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
             sample_indices = range(num_samples)
             for idx, index in enumerate(sample_indices):
                 image = last_batch_images_gather[index]
+                image = (image.transpose(1, 2, 0) * 255).astype(np.float32).astype(np.uint8)
+                ref_image = last_batch_ref_images_gather[index]
                 pil = Image.fromarray(
-                    (image.transpose(1, 2, 0) * 255).astype(np.float32).astype(np.uint8)
+                    np.concatenate([ref_image, image], axis=1)
                 )
-                pil = pil.resize((config.resolution, config.resolution))
                 pil.save(os.path.join(tmpdir, f"{idx}.jpg"))
+            sampled_sources = [last_batch_sources_gather[index] for index in sample_indices]
             sampled_prompts = [last_batch_prompts_gather[index] for index in sample_indices]
             sampled_rewards = [{k: last_batch_rewards_gather[k][index] for k in last_batch_rewards_gather} for index in sample_indices]
             for key, value in all_rewards.items():
@@ -244,9 +251,9 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
                     "eval_images": [
                         wandb.Image(
                             os.path.join(tmpdir, f"{idx}.jpg"),
-                            caption=f"{prompt:.1000} | " + " | ".join(f"{k}: {v:.2f}" for k, v in reward.items() if v != -10),
+                            caption=f"{source}: {prompt:.1000} | " + " | ".join(f"{k}: {v:.2f}" for k, v in reward.items() if v != -10),
                         )
-                        for idx, (prompt, reward) in enumerate(zip(sampled_prompts, sampled_rewards))
+                        for idx, (source, prompt, reward) in enumerate(zip(sampled_sources, sampled_prompts, sampled_rewards))
                     ],
                     **{f"eval_reward_{key}": np.mean(value[value != -10]) for key, value in all_rewards.items()},
                 },
@@ -640,10 +647,12 @@ def main(_):
 
                 for idx, i in enumerate(sample_indices):
                     image = images[i]
+                    image = (image.float().cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
+                    ref_image = ref_images[i]
                     pil = Image.fromarray(
-                        (image.float().cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
+                        np.concatenate([np.array(ref_image), image], axis=1)
                     )
-                    pil = pil.resize((config.resolution, config.resolution))
+                    # pil = pil.resize((config.resolution, config.resolution))
                     pil.save(os.path.join(tmpdir, f"{idx}.jpg"))  # 使用新的索引
 
                 sampled_prompts = [prompts[i] for i in sample_indices]

@@ -15,14 +15,14 @@ def compressibility():
         "lpips": 0.9,
     }
     config.eval_reward_fn = {
-        "image_similarity": 1,
+        # "image_similarity": 1,
         "lpips": 1,
         "ssim": 1,
         "psnr": 1,
         "niqe": 1,
         "musiq": 1,
     }
-    config.sample.test_batch_size = 1 # This bs is a special design, the test set has a total of 2048, to make gpu_num*bs*n as close as possible to 2048, because when the number of samples cannot be divided evenly by the number of cards, multi-card will fill the last batch to ensure each card has the same number of samples, affecting gradient synchronization.
+    config.sample.test_batch_size = 8 # This bs is a special design, the test set has a total of 2048, to make gpu_num*bs*n as close as possible to 2048, because when the number of samples cannot be divided evenly by the number of cards, multi-card will fill the last batch to ensure each card has the same number of samples, affecting gradient synchronization.
 
     config.use_lora = True
 

@@ -92,9 +92,11 @@ class EvalPromptImageDataset(Dataset):
             hq_image = Image.open(os.path.join(self.dataset, hq_image_path)).convert('RGB')
             item["image_target"] = hq_image
         else:
-            item["image_target"] = image
+            item["image_target"] = None
         
         for k in ["image", "image_target"]:
+            if item[k] is None:
+                continue
             # center crop item[k]
             item[k] = center_crop(item[k], min(item[k].size))
         

@@ -222,11 +222,14 @@ def eval(pipeline, test_dataloader, config, rank, local_rank, world_size, device
         sources_gather = gather_object(sources, world_size)
 
         for key, value in rewards.items():
+            if key == 'avg':
+                continue
             rewards_gather = gather_tensor(torch.as_tensor(value, device=device).contiguous(), world_size).cpu().float().numpy()
             all_rewards[key].append(rewards_gather)
             all_sources[key].append(sources_gather)
     
     last_batch_images_gather = gather_tensor(torch.as_tensor(images, device=device), world_size).cpu().float().numpy()
+    last_batch_ref_images_gather = gather_tensor(torch.as_tensor(np.array(ref_images), device=device), world_size).cpu().numpy()
     last_batch_prompt_ids = pipeline.tokenizer(
         prompts,
         padding="max_length",
@@ -241,6 +244,7 @@ def eval(pipeline, test_dataloader, config, rank, local_rank, world_size, device
     last_batch_rewards_gather = {}
     for key, value in rewards.items():
         last_batch_rewards_gather[key] = gather_tensor(torch.as_tensor(value, device=device).contiguous(), world_size).cpu().float().numpy()
+    last_batch_sources_gather = sources_gather
 
     all_rewards = {key: np.concatenate(value) for key, value in all_rewards.items()}
     all_sources = {key: [s for sublist in value for s in sublist] for key, value in all_sources.items()}
@@ -252,7 +256,8 @@ def eval(pipeline, test_dataloader, config, rank, local_rank, world_size, device
         unique_sources = np.unique(sources_np)
         for source in unique_sources:
             mask = (sources_np == source)
-            grouped_rewards[f"{source}_{key}"] = rewards[mask]
+            if np.any(rewards[mask]):
+                grouped_rewards[f"{source}_{key}"] = rewards[mask]
     all_rewards = grouped_rewards
 
     if rank == 0:
@@ -261,11 +266,14 @@ def eval(pipeline, test_dataloader, config, rank, local_rank, world_size, device
             sample_indices = range(num_samples)
             for idx, index in enumerate(sample_indices):
                 image = last_batch_images_gather[index]
+                image = (image.transpose(1, 2, 0) * 255).astype(np.uint8)
+                ref_image = last_batch_ref_images_gather[index]
                 pil = Image.fromarray(
-                    (image.transpose(1, 2, 0) * 255).astype(np.uint8)
+                    np.concatenate([ref_image, image], axis=1)
                 )
-                pil = pil.resize((config.resolution, config.resolution))
+                # pil = pil.resize((config.resolution, config.resolution))
                 pil.save(os.path.join(tmpdir, f"{idx}.jpg"))
+            sampled_sources = [last_batch_sources_gather[index] for index in sample_indices]
             sampled_prompts = [last_batch_prompts_gather[index] for index in sample_indices]
             sampled_rewards = [{k: last_batch_rewards_gather[k][index] for k in last_batch_rewards_gather} for index in sample_indices]
             for key, value in all_rewards.items():
@@ -275,9 +283,9 @@ def eval(pipeline, test_dataloader, config, rank, local_rank, world_size, device
                     "eval_images": [
                         wandb.Image(
                             os.path.join(tmpdir, f"{idx}.jpg"),
-                            caption=f"{prompt:.1000} | " + " | ".join(f"{k}: {v:.2f}" for k, v in reward.items() if v != -10),
+                            caption=f"{source}: {prompt:.1000} | " + " | ".join(f"{k}: {v:.2f}" for k, v in reward.items() if v != -10),
                         )
-                        for idx, (prompt, reward) in enumerate(zip(sampled_prompts, sampled_rewards))
+                        for idx, (source, prompt, reward) in enumerate(zip(sampled_sources, sampled_prompts, sampled_rewards))
                     ],
                     **{f"eval_reward_{key}": np.mean(value[value != -10]) for key, value in all_rewards.items()},
                 },
