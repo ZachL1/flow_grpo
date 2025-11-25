@@ -526,12 +526,14 @@ def main(_):
 
     while True:
         #################### EVAL ####################
+        torch.cuda.empty_cache()
         pipeline.transformer.eval()
         if epoch % config.eval_freq == 0:
             eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerator, global_step, eval_reward_fn, executor, autocast, num_train_timesteps, ema, transformer_trainable_parameters)
         if epoch % config.save_freq == 0 and accelerator.is_main_process:
             save_ckpt(config.save_dir, transformer, global_step, accelerator, ema, transformer_trainable_parameters, config)
         #################### SAMPLING ####################
+        torch.cuda.empty_cache()
         pipeline.transformer.eval()
         samples = []
         prompts = []
@@ -756,6 +758,7 @@ def main(_):
         assert num_timesteps == config.sample.num_steps
 
         #################### TRAINING ####################
+        torch.cuda.empty_cache()
         for inner_epoch in range(config.train.num_inner_epochs):
             # shuffle samples along batch dimension
             perm = torch.randperm(total_batch_size, device=accelerator.device)

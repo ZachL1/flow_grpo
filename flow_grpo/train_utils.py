@@ -4,7 +4,8 @@ from PIL import Image
 from torch.utils.data import Dataset, Sampler
 import torch
 from torchvision.transforms.functional import to_pil_image, center_crop
-
+import random
+import numpy as np
 from realesrgan.realesrgan import RealESRGANDataset
 from realesrgan.batch_transform import RealESRGANBatchTransform
 from realesrgan import data_config
@@ -36,9 +37,15 @@ class RealESRGANPromptImageDataset(Dataset):
         self.batch_transform = RealESRGANBatchTransform(**data_config['batch_transform']['params'])
     
     def __len__(self):
-        return len(self.dataset)
+        return len(self.dataset) * 100
     
     def __getitem__(self, idx):
+        # set random seed
+        random.seed(idx)
+        np.random.seed(idx)
+        torch.manual_seed(idx)
+
+        idx = idx % len(self.dataset)
         item = self.dataset[idx]
         assert item['filename'].endswith(self.image_paths[idx]), f"filename {item['filename']} does not match image path {self.image_paths[idx]}"
 
