@@ -89,6 +89,16 @@ class RealESRGANBatchTransform(BatchTransform):
         self.queue = {}
         self.resize_back = resize_back
 
+        self.rd = random.Random(42)
+        self.np_rd = np.random.default_rng(42)
+        self.torch_rd = torch.Generator()
+        self.torch_rd.manual_seed(42)
+
+    def set_seed(self, seed: int):
+        self.rd.seed(seed)
+        self.np_rd = np.random.default_rng(seed)
+        self.torch_rd.manual_seed(seed)
+
     @torch.no_grad()
     def _dequeue_and_enqueue(self, values: Dict[str, torch.Tensor | List[str]]) -> Dict[str, torch.Tensor | List[str]]:
         """It is the training pair pool for increasing the diversity in a batch.
@@ -121,7 +131,7 @@ class RealESRGANBatchTransform(BatchTransform):
         results = {}
         if self.queue_ptr == self.queue_size:
             # The queue is full, do dequeue and enqueue
-            idx = torch.randperm(self.queue_size)
+            idx = torch.randperm(self.queue_size, generator=self.torch_rd)
             for k, q in self.queue.items():
                 v = values[k]
                 b = len(v)
@@ -172,23 +182,24 @@ class RealESRGANBatchTransform(BatchTransform):
         # blur
         out = filter2D(hq, kernel1)
         # random resize
-        updown_type = random.choices(["up", "down", "keep"], self.resize_prob)[0]
+        updown_type = self.rd.choices(["up", "down", "keep"], self.resize_prob)[0]
         if updown_type == "up":
-            scale = np.random.uniform(1, self.resize_range[1])
+            scale = self.np_rd.uniform(1, self.resize_range[1])
         elif updown_type == "down":
-            scale = np.random.uniform(self.resize_range[0], 1)
+            scale = self.np_rd.uniform(self.resize_range[0], 1)
         else:
             scale = 1
-        mode = random.choice(["area", "bilinear", "bicubic"])
+        mode = self.rd.choice(["area", "bilinear", "bicubic"])
         out = F.interpolate(out, scale_factor=scale, mode=mode)
         # add noise
-        if np.random.uniform() < self.gaussian_noise_prob:
+        if self.np_rd.uniform() < self.gaussian_noise_prob:
             out = random_add_gaussian_noise_pt(
                 out,
                 sigma_range=self.noise_range,
                 clip=True,
                 rounds=False,
                 gray_prob=self.gray_noise_prob,
+                torch_rd=self.torch_rd,
             )
         else:
             out = random_add_poisson_noise_pt(
@@ -197,6 +208,7 @@ class RealESRGANBatchTransform(BatchTransform):
                 gray_prob=self.gray_noise_prob,
                 clip=True,
                 rounds=False,
+                torch_rd=self.torch_rd,
             )
         # JPEG compression
         jpeg_p = out.new_zeros(out.size(0)).uniform_(*self.jpeg_range)
@@ -206,36 +218,37 @@ class RealESRGANBatchTransform(BatchTransform):
 
         # ----------------------- The second degradation process ----------------------- #
         # blur
-        if np.random.uniform() < self.second_blur_prob:
+        if self.np_rd.uniform() < self.second_blur_prob:
             out = filter2D(out, kernel2)
 
         # select scale of second degradation stage
         if isinstance(self.stage2_scale, Sequence):
             min_scale, max_scale = self.stage2_scale
-            stage2_scale = np.random.uniform(min_scale, max_scale)
+            stage2_scale = self.np_rd.uniform(min_scale, max_scale)
         else:
             stage2_scale = self.stage2_scale
         stage2_h, stage2_w = int(ori_h / stage2_scale), int(ori_w / stage2_scale)
         # print(f"stage2 scale = {stage2_scale}")
 
         # random resize
-        updown_type = random.choices(["up", "down", "keep"], self.resize_prob2)[0]
+        updown_type = self.rd.choices(["up", "down", "keep"], self.resize_prob2)[0]
         if updown_type == "up":
-            scale = np.random.uniform(1, self.resize_range2[1])
+            scale = self.np_rd.uniform(1, self.resize_range2[1])
         elif updown_type == "down":
-            scale = np.random.uniform(self.resize_range2[0], 1)
+            scale = self.np_rd.uniform(self.resize_range2[0], 1)
         else:
             scale = 1
-        mode = random.choice(["area", "bilinear", "bicubic"])
+        mode = self.rd.choice(["area", "bilinear", "bicubic"])
         out = F.interpolate(out, size=(int(stage2_h * scale), int(stage2_w * scale)), mode=mode)
         # add noise
-        if np.random.uniform() < self.gaussian_noise_prob2:
+        if self.np_rd.uniform() < self.gaussian_noise_prob2:
             out = random_add_gaussian_noise_pt(
                 out,
                 sigma_range=self.noise_range2,
                 clip=True,
                 rounds=False,
                 gray_prob=self.gray_noise_prob2,
+                torch_rd=self.torch_rd,
             )
         else:
             out = random_add_poisson_noise_pt(
@@ -244,6 +257,7 @@ class RealESRGANBatchTransform(BatchTransform):
                 gray_prob=self.gray_noise_prob2,
                 clip=True,
                 rounds=False,
+                torch_rd=self.torch_rd,
             )
 
         # JPEG compression + the final sinc filter
@@ -253,9 +267,9 @@ class RealESRGANBatchTransform(BatchTransform):
         #   1. [resize back + sinc filter] + JPEG compression
         #   2. JPEG compression + [resize back + sinc filter]
         # Empirically, we find other combinations (sinc + JPEG + Resize) will introduce twisted lines.
-        if np.random.uniform() < 0.5:
+        if self.np_rd.uniform() < 0.5:
             # resize back + the final sinc filter
-            mode = random.choice(["area", "bilinear", "bicubic"])
+            mode = self.rd.choice(["area", "bilinear", "bicubic"])
             out = F.interpolate(out, size=(stage2_h, stage2_w), mode=mode)
             out = filter2D(out, sinc_kernel)
             # JPEG compression
@@ -268,7 +282,7 @@ class RealESRGANBatchTransform(BatchTransform):
             out = torch.clamp(out, 0, 1)
             out = self.jpeger(out, quality=jpeg_p)
             # resize back + the final sinc filter
-            mode = random.choice(["area", "bilinear", "bicubic"])
+            mode = self.rd.choice(["area", "bilinear", "bicubic"])
             out = F.interpolate(out, size=(stage2_h, stage2_w), mode=mode)
             out = filter2D(out, sinc_kernel)
 

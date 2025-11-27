@@ -65,10 +65,10 @@ def center_crop_arr(pil_image, image_size):
 
 
 # https://github.com/openai/guided-diffusion/blob/main/guided_diffusion/image_datasets.py
-def random_crop_arr(pil_image, image_size, min_crop_frac=0.8, max_crop_frac=1.0):
+def random_crop_arr(pil_image, image_size, min_crop_frac=0.8, max_crop_frac=1.0, rd=random):
     min_smaller_dim_size = math.ceil(image_size / max_crop_frac)
     max_smaller_dim_size = math.ceil(image_size / min_crop_frac)
-    smaller_dim_size = random.randrange(min_smaller_dim_size, max_smaller_dim_size + 1)
+    smaller_dim_size = rd.randrange(min_smaller_dim_size, max_smaller_dim_size + 1)
 
     # We are not on a new enough PIL to support the `reducing_gap`
     # argument, which uses BOX downsampling at powers of two first.
@@ -84,13 +84,13 @@ def random_crop_arr(pil_image, image_size, min_crop_frac=0.8, max_crop_frac=1.0)
     )
 
     arr = np.array(pil_image)
-    crop_y = random.randrange(arr.shape[0] - image_size + 1)
-    crop_x = random.randrange(arr.shape[1] - image_size + 1)
+    crop_y = rd.randrange(arr.shape[0] - image_size + 1)
+    crop_x = rd.randrange(arr.shape[1] - image_size + 1)
     return arr[crop_y : crop_y + image_size, crop_x : crop_x + image_size]
 
 
 # https://github.com/XPixelGroup/BasicSR/blob/master/basicsr/data/transforms.py
-def augment(imgs, hflip=True, rotation=True, flows=None, return_status=False):
+def augment(imgs, hflip=True, rotation=True, flows=None, return_status=False, rd=random):
     """Augment: horizontal flips OR rotate (0, 90, 180, 270 degrees).
 
     We use vertical flip and transpose for rotation implementation.
@@ -112,9 +112,9 @@ def augment(imgs, hflip=True, rotation=True, flows=None, return_status=False):
             results only have one element, just return ndarray.
 
     """
-    hflip = hflip and random.random() < 0.5
-    vflip = rotation and random.random() < 0.5
-    rot90 = rotation and random.random() < 0.5
+    hflip = hflip and rd.random() < 0.5
+    vflip = rotation and rd.random() < 0.5
+    rot90 = rotation and rd.random() < 0.5
 
     def _augment(img):
         if hflip:  # horizontal

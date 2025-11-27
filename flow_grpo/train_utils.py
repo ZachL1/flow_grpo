@@ -41,9 +41,8 @@ class RealESRGANPromptImageDataset(Dataset):
     
     def __getitem__(self, idx):
         # set random seed
-        random.seed(idx)
-        np.random.seed(idx)
-        torch.manual_seed(idx)
+        self.dataset.set_seed(idx)
+        self.batch_transform.set_seed(idx)
 
         idx = idx % len(self.dataset)
         item = self.dataset[idx]

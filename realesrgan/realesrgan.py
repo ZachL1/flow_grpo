@@ -86,6 +86,13 @@ class RealESRGANDataset(data.Dataset):
         self.p_empty_prompt = p_empty_prompt
         self.return_file_name = return_file_name
 
+        self.rd = random.Random(42)
+        self.np_rd = np.random.default_rng(42)
+    
+    def set_seed(self, seed: int):
+        self.rd.seed(seed)
+        self.np_rd = np.random.default_rng(seed)
+
     def load_gt_image(self, image_path: str, max_retry: int = 5) -> Optional[np.ndarray]:
         image_bytes = None
         while image_bytes is None:
@@ -113,7 +120,7 @@ class RealESRGANDataset(data.Dataset):
                 if self.crop_type == "center":
                     image = center_crop_arr(image, self.out_size)
                 elif self.crop_type == "random":
-                    image = random_crop_arr(image, self.out_size, min_crop_frac=0.7)
+                    image = random_crop_arr(image, self.out_size, min_crop_frac=0.7, rd=self.rd)
         else:
             assert image.height == self.out_size and image.width == self.out_size
             image = np.array(image)
@@ -133,24 +140,24 @@ class RealESRGANDataset(data.Dataset):
             img_gt = self.load_gt_image(gt_path)
             if img_gt is None:
                 print(f"failed to load {gt_path}, try another image")
-                index = random.randint(0, len(self) - 1)
+                index = self.rd.randint(0, len(self) - 1)
 
         # hwc, rgb to bgr, [0, 255] to [0, 1], float32
         img_hq = (img_gt[..., ::-1] / 255.0).astype(np.float32)
-        if np.random.uniform() < self.p_empty_prompt:
+        if self.np_rd.uniform() < self.p_empty_prompt:
             prompt = ""
 
         # -------------------- Do augmentation for training: flip, rotation -------------------- #
-        img_hq = augment(img_hq, self.use_hflip, self.use_rot)
+        img_hq = augment(img_hq, self.use_hflip, self.use_rot, rd=self.rd)
 
         # ------------------------ Generate kernels (used in the first degradation) ------------------------ #
-        kernel_size = random.choice(self.kernel_range)
-        if np.random.uniform() < self.sinc_prob:
+        kernel_size = self.rd.choice(self.kernel_range)
+        if self.np_rd.uniform() < self.sinc_prob:
             # this sinc filter setting is for kernels ranging from [7, 21]
             if kernel_size < 13:
-                omega_c = np.random.uniform(np.pi / 3, np.pi)
+                omega_c = self.np_rd.uniform(np.pi / 3, np.pi)
             else:
-                omega_c = np.random.uniform(np.pi / 5, np.pi)
+                omega_c = self.np_rd.uniform(np.pi / 5, np.pi)
             kernel = circular_lowpass_kernel(omega_c, kernel_size, pad_to=False)
         else:
             kernel = random_mixed_kernels(
@@ -163,18 +170,20 @@ class RealESRGANDataset(data.Dataset):
                 self.betag_range,
                 self.betap_range,
                 noise_range=None,
+                rd=self.rd,
+                np_rd=self.np_rd,
             )
         # pad kernel
         pad_size = (21 - kernel_size) // 2
         kernel = np.pad(kernel, ((pad_size, pad_size), (pad_size, pad_size)))
 
         # ------------------------ Generate kernels (used in the second degradation) ------------------------ #
-        kernel_size = random.choice(self.kernel_range)
-        if np.random.uniform() < self.sinc_prob2:
+        kernel_size = self.rd.choice(self.kernel_range)
+        if self.np_rd.uniform() < self.sinc_prob2:
             if kernel_size < 13:
-                omega_c = np.random.uniform(np.pi / 3, np.pi)
+                omega_c = self.np_rd.uniform(np.pi / 3, np.pi)
             else:
-                omega_c = np.random.uniform(np.pi / 5, np.pi)
+                omega_c = self.np_rd.uniform(np.pi / 5, np.pi)
             kernel2 = circular_lowpass_kernel(omega_c, kernel_size, pad_to=False)
         else:
             kernel2 = random_mixed_kernels(
@@ -187,6 +196,8 @@ class RealESRGANDataset(data.Dataset):
                 self.betag_range2,
                 self.betap_range2,
                 noise_range=None,
+                rd=self.rd,
+                np_rd=self.np_rd,
             )
 
         # pad kernel
@@ -194,9 +205,9 @@ class RealESRGANDataset(data.Dataset):
         kernel2 = np.pad(kernel2, ((pad_size, pad_size), (pad_size, pad_size)))
 
         # ------------------------------------- the final sinc kernel ------------------------------------- #
-        if np.random.uniform() < self.final_sinc_prob:
-            kernel_size = random.choice(self.kernel_range)
-            omega_c = np.random.uniform(np.pi / 3, np.pi)
+        if self.np_rd.uniform() < self.final_sinc_prob:
+            kernel_size = self.rd.choice(self.kernel_range)
+            omega_c = self.np_rd.uniform(np.pi / 3, np.pi)
             sinc_kernel = circular_lowpass_kernel(omega_c, kernel_size, pad_to=21)
             sinc_kernel = torch.FloatTensor(sinc_kernel)
         else:
