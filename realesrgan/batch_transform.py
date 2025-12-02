@@ -211,7 +211,7 @@ class RealESRGANBatchTransform(BatchTransform):
                 torch_rd=self.torch_rd,
             )
         # JPEG compression
-        jpeg_p = out.new_zeros(out.size(0)).uniform_(*self.jpeg_range)
+        jpeg_p = out.new_zeros(out.size(0)).uniform_(*self.jpeg_range, generator=self.torch_rd)
         # clamp to [0, 1], otherwise JPEGer will result in unpleasant artifacts
         out = torch.clamp(out, 0, 1)
         out = self.jpeger(out, quality=jpeg_p)
@@ -273,12 +273,12 @@ class RealESRGANBatchTransform(BatchTransform):
             out = F.interpolate(out, size=(stage2_h, stage2_w), mode=mode)
             out = filter2D(out, sinc_kernel)
             # JPEG compression
-            jpeg_p = out.new_zeros(out.size(0)).uniform_(*self.jpeg_range2)
+            jpeg_p = out.new_zeros(out.size(0)).uniform_(*self.jpeg_range2, generator=self.torch_rd)
             out = torch.clamp(out, 0, 1)
             out = self.jpeger(out, quality=jpeg_p)
         else:
             # JPEG compression
-            jpeg_p = out.new_zeros(out.size(0)).uniform_(*self.jpeg_range2)
+            jpeg_p = out.new_zeros(out.size(0)).uniform_(*self.jpeg_range2, generator=self.torch_rd)
             out = torch.clamp(out, 0, 1)
             out = self.jpeger(out, quality=jpeg_p)
             # resize back + the final sinc filter

@@ -562,6 +562,7 @@ def main(_):
     train_iter = iter(train_dataloader)
     while True:
         #################### EVAL ####################
+        torch.cuda.empty_cache()
         pipeline.transformer.eval()
         if epoch % config.save_freq == 0 and epoch > 0:
             save_fsdp_checkpoint(config.save_dir, transformer, global_step, rank)
@@ -570,6 +571,7 @@ def main(_):
 
         
         #################### SAMPLING ####################
+        torch.cuda.empty_cache()
         pipeline.transformer.eval()
         samples = []
         for i in tqdm(
@@ -699,10 +701,12 @@ def main(_):
 
                 for idx, i in enumerate(sample_indices):
                     image = images[i]
+                    image = (image.float().cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
+                    ref_image = ref_images[i]
                     pil = Image.fromarray(
-                        (image.cpu().float().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
+                        np.concatenate([np.array(ref_image), image], axis=1)
                     )
-                    pil = pil.resize((config.resolution, config.resolution))
+                    # pil = pil.resize((config.resolution, config.resolution))
                     pil.save(os.path.join(tmpdir, f"{idx}.jpg"))
 
                 sampled_prompts = [prompts[i] for i in sample_indices]
@@ -782,6 +786,7 @@ def main(_):
         gradient_accumulation_steps = config.train.gradient_accumulation_steps * num_train_timesteps
 
         #################### TRAINING ####################
+        torch.cuda.empty_cache()
         for inner_epoch in range(config.train.num_inner_epochs):
             # rebatch for training
             samples_batched = {
