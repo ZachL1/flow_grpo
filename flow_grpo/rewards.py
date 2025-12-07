@@ -189,6 +189,25 @@ def image_similarity_score(device):
 
     return _fn
 
+def dino_score(device):
+    from flow_grpo.dino_scorer import DinoScorer
+
+    scorer = DinoScorer(device=device).cuda()
+
+    def _fn(images, ref_images):
+        if not isinstance(images, torch.Tensor):
+            images = images.transpose(0, 3, 1, 2)  # NHWC -> NCHW
+            images = torch.tensor(images, dtype=torch.uint8)/255.0
+        if not isinstance(ref_images, torch.Tensor):
+            ref_images = [np.array(img) for img in ref_images]
+            ref_images = np.array(ref_images)
+            ref_images = ref_images.transpose(0, 3, 1, 2)  # NHWC -> NCHW
+            ref_images = torch.tensor(ref_images, dtype=torch.uint8)/255.0
+        scores = scorer.image_similarity(images, ref_images)
+        return scores, {}
+
+    return _fn
+
 def pickscore_score(device):
     from flow_grpo.pickscore_scorer import PickScoreScorer
 
@@ -534,6 +553,7 @@ def multi_score(device, score_dict):
         "clipscore": clip_score,
         "image_similarity": image_similarity_score,
         "image_similarity_target": image_similarity_score,
+        "dino": dino_score,
         "lpips": lpips_score,
         "ssim": ssim_score,
         "psnr": psnr_score,
@@ -562,7 +582,7 @@ def multi_score(device, score_dict):
                     score_details[f'{key}_accuracy'] = value
             elif score_name == "image_similarity":
                 scores, rewards = score_fns[score_name](images, ref_images)
-            elif score_name in ["image_similarity_target", "lpips", "ssim", "psnr"]:
+            elif score_name in ["image_similarity_target", "lpips", "ssim", "psnr", "dino"]:
                 scores = torch.ones(len(images), device=device, dtype=torch.float) * -10
                 valid_indices = [img is not None for img in target_images]
                 valid_target = [img for img in target_images if img is not None]

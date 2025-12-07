@@ -11,9 +11,10 @@ def compressibility():
     config.test_dataset = os.path.join(os.getcwd(), "dataset/eval")
     config.reward_fn = {
         # "image_similarity": 0.1,
-        "image_similarity_target": 0.1,
-        "ssim": 0.4,
-        "lpips": 0.5,
+        # "image_similarity_target": 0.1,
+        "dino": 0.3, # 基于DINO的奖励很难通过简单的像素噪声来欺骗，因为它要求图像在高级语义结构上与GT一致。这能有效迫使模型生成结构正确且纹理自然的图像。
+        "ssim": 0.3,
+        "lpips": 0.4,
     }
     config.eval_reward_fn = {
         # "image_similarity": 1,
@@ -53,9 +54,9 @@ def ir_flux_kontext_1gpu():
     config.sample.guidance_scale = 2.5
 
     config.resolution = 512
-    config.sample.train_batch_size = 1
-    config.sample.num_image_per_prompt = 1
-    config.sample.num_batches_per_epoch = int(2/(gpu_number*config.sample.train_batch_size/config.sample.num_image_per_prompt))
+    config.sample.train_batch_size = 2
+    config.sample.num_image_per_prompt = 2
+    config.sample.num_batches_per_epoch = int(12/(gpu_number*config.sample.train_batch_size/config.sample.num_image_per_prompt))
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
 
     config.train.use_gradient_checkpointing = True
@@ -76,7 +77,7 @@ def ir_flux_kontext_1gpu():
     return config
 
 def ir_flux_kontext():
-    gpu_number=8
+    gpu_number=24
     config = compressibility()
 
     config.pretrained.model = "black-forest-labs/FLUX.1-Kontext-dev"
@@ -85,8 +86,8 @@ def ir_flux_kontext():
     config.sample.guidance_scale = 2.5
 
     config.resolution = 512
-    config.sample.train_batch_size = 2
-    config.sample.num_image_per_prompt = 16
+    config.sample.train_batch_size = 3
+    config.sample.num_image_per_prompt = 24
     config.sample.num_batches_per_epoch = int(48/(gpu_number*config.sample.train_batch_size/config.sample.num_image_per_prompt))
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
 
